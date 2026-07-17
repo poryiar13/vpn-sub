@@ -1,8 +1,8 @@
-name: Update VPN Subscription
+name: Rebuild Xray Balancer Config
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # every 6 hours
+    - cron: "0 */6 * * *"   # every 6 hours - just refreshes the server LIST
   workflow_dispatch: {}
 
 permissions:
@@ -23,13 +23,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run updater
-        run: python update_sub.py
+      - name: Build config.json
+        run: python build_config.py
 
       - name: Commit and push results
         run: |
           git config user.name "sub-bot"
           git config user.email "sub-bot@users.noreply.github.com"
-          git add subscription.txt
-          git diff --quiet --cached || git commit -m "Auto-update subscription $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git add config.json
+          git diff --quiet --cached || git commit -m "Auto-rebuild config.json $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push
