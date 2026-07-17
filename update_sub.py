@@ -16,6 +16,7 @@ import time
 import base64
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import quote, unquote
 
 CHANNEL = "ConfigsHUB"
 TARGET_CONFIGS = 25
@@ -23,6 +24,20 @@ MAX_PAGES = 15          # safety cap on how far back in history to look
 
 # Only these three protocols - skipping ss:// on purpose (per project scope)
 CONFIG_RE = re.compile(r'(?:vless|vmess|trojan)://[^\s<>"\']+')
+
+
+def normalize_tag(link: str) -> str:
+    """Percent-encode the part after '#' (the display name) so clients
+    that expect a properly-encoded fragment don't truncate it at the
+    first special character (e.g. '[')."""
+    if "#" not in link:
+        return link
+    base, frag = link.split("#", 1)
+    try:
+        decoded = unquote(frag)
+    except Exception:
+        decoded = frag
+    return f"{base}#{quote(decoded, safe='')}"
 
 
 def fetch_page(channel: str, before: int | None):
@@ -68,7 +83,8 @@ def gather_configs(channel: str, target: int) -> list:
     seen = set()
     unique = []
     for text in iter_message_texts(channel):
-        for link in CONFIG_RE.findall(text):
+        for raw_link in CONFIG_RE.findall(text):
+            link = normalize_tag(raw_link)
             if link not in seen:
                 seen.add(link)
                 unique.append(link)
