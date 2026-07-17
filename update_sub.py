@@ -15,8 +15,8 @@ import base64
 import requests
 from bs4 import BeautifulSoup
 
-CHANNEL = "SOSkeyNET"
-MESSAGE_COUNT = 10
+CHANNEL = "ConfigsHUB"
+MESSAGE_COUNT = 20
 
 CONFIG_RE = re.compile(r'(?:vless|vmess|trojan|ss)://[^\s<>"\']+')
 
