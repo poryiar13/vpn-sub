@@ -2,7 +2,7 @@ name: Rebuild Xray Balancer Config
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # every 6 hours - just refreshes the server LIST
+    - cron: "0 */1 * * *"   # every 6 hours - just refreshes the server LIST
   workflow_dispatch: {}
 
 permissions:
