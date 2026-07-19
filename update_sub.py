@@ -16,7 +16,7 @@ import time
 import base64
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 CHANNEL = "ConfigsHUB"
 TARGET_CONFIGS = 25
@@ -38,23 +38,21 @@ def flag_to_country_code(flag: str) -> str:
     return "".join(chr(ord(ch) - 0x1F1E6 + ord("A")) for ch in flag)
 
 
-def build_display_tag(raw_link: str) -> str:
-    frag = raw_link.split("#", 1)[1] if "#" in raw_link else ""
-    try:
-        frag = unquote(frag)
-    except Exception:
-        pass
-    match = FLAG_RE.search(frag)
+def build_display_tag(message_text: str) -> str:
+    """Look for a flag emoji anywhere in the message the config came
+    from (not just inside the link's own '#' tag) - in practice the
+    flag is often placed elsewhere in the post."""
+    match = FLAG_RE.search(message_text)
     if match:
         return f"Config [{flag_to_country_code(match.group(0))}]"
     return "Config"
 
 
-def normalize_tag(raw_link: str) -> str:
+def normalize_tag(raw_link: str, message_text: str) -> str:
     """Replace whatever name/flag the channel used with a clean, fixed
     'Config [+flag]' name, properly percent-encoded."""
     base = raw_link.split("#", 1)[0]
-    tag = build_display_tag(raw_link)
+    tag = build_display_tag(message_text)
     return f"{base}#{quote(tag, safe='')}"
 
 
@@ -102,7 +100,7 @@ def gather_configs(channel: str, target: int) -> list:
     unique = []
     for text in iter_message_texts(channel):
         for raw_link in CONFIG_RE.findall(text):
-            link = normalize_tag(raw_link)
+            link = normalize_tag(raw_link, text)
             if link not in seen:
                 seen.add(link)
                 unique.append(link)
