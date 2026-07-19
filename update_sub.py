@@ -31,6 +31,13 @@ CONFIG_RE = re.compile(r'(?:vless|vmess|trojan)://[^\s<>"\']+')
 FLAG_RE = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
 
 
+def flag_to_country_code(flag: str) -> str:
+    """Convert a flag emoji (two regional-indicator symbols) into its
+    plain 2-letter code, e.g. 🇩🇪 -> 'DE'. Plain text renders reliably
+    in every client, unlike the flag glyph itself."""
+    return "".join(chr(ord(ch) - 0x1F1E6 + ord("A")) for ch in flag)
+
+
 def build_display_tag(raw_link: str) -> str:
     frag = raw_link.split("#", 1)[1] if "#" in raw_link else ""
     try:
@@ -38,7 +45,9 @@ def build_display_tag(raw_link: str) -> str:
     except Exception:
         pass
     match = FLAG_RE.search(frag)
-    return f"Config {match.group(0)}" if match else "Config"
+    if match:
+        return f"Config [{flag_to_country_code(match.group(0))}]"
+    return "Config"
 
 
 def normalize_tag(raw_link: str) -> str:
