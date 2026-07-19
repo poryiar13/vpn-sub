@@ -26,18 +26,27 @@ MAX_PAGES = 15          # safety cap on how far back in history to look
 CONFIG_RE = re.compile(r'(?:vless|vmess|trojan)://[^\s<>"\']+')
 
 
-def normalize_tag(link: str) -> str:
-    """Percent-encode the part after '#' (the display name) so clients
-    that expect a properly-encoded fragment don't truncate it at the
-    first special character (e.g. '[')."""
-    if "#" not in link:
-        return link
-    base, frag = link.split("#", 1)
+# Matches a real country flag (two regional-indicator symbols), but NOT
+# generic symbols like the checkered flag used for "unknown/mixed" servers.
+FLAG_RE = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
+
+
+def build_display_tag(raw_link: str) -> str:
+    frag = raw_link.split("#", 1)[1] if "#" in raw_link else ""
     try:
-        decoded = unquote(frag)
+        frag = unquote(frag)
     except Exception:
-        decoded = frag
-    return f"{base}#{quote(decoded, safe='')}"
+        pass
+    match = FLAG_RE.search(frag)
+    return f"Config {match.group(0)}" if match else "Config"
+
+
+def normalize_tag(raw_link: str) -> str:
+    """Replace whatever name/flag the channel used with a clean, fixed
+    'Config [+flag]' name, properly percent-encoded."""
+    base = raw_link.split("#", 1)[0]
+    tag = build_display_tag(raw_link)
+    return f"{base}#{quote(tag, safe='')}"
 
 
 def fetch_page(channel: str, before: int | None):
