@@ -18,9 +18,9 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 
-CHANNEL = "ConfigsHUB"
-TARGET_CONFIGS = 25
-MAX_PAGES = 15          # safety cap on how far back in history to look
+CHANNEL = "Gp_config"
+TARGET_CONFIGS = 40
+MAX_PAGES = 20          # safety cap on how far back in history to look
 
 # Only these three protocols - skipping ss:// on purpose (per project scope)
 CONFIG_RE = re.compile(r'(?:vless|vmess|trojan)://[^\s<>"\']+')
