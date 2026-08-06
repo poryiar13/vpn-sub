@@ -25,7 +25,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 
-CHANNEL = "SOSkeyNET"
+CHANNEL = "configraygan"
 TARGET_CONFIGS = 30
 MAX_PAGES = 25          # safety cap on how far back in history to look
 
