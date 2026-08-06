@@ -2,11 +2,17 @@
 """
 Telegram VPN Config Subscription Updater (simple version, no testing)
 ------------------------------------------------------------------------
-Walks backward through the channel's message history (paging with
+Walks backward through the source's message history (paging with
 Telegram's public ?before= parameter) until it has collected
-TARGET_CONFIGS unique vless/vmess/trojan links - no connectivity
-testing (GitHub Actions' IP range gets blocked by many of these
-servers, so a "positive" test from there isn't meaningful anyway).
+TARGET_CONFIGS unique vless/vmess/trojan links.
+
+Text extraction and pagination are handled independently: all message
+text blocks on the page are collected directly (not just the first one
+per "message wrapper"), because group chats often cluster several
+consecutive messages from different authors inside one wrapper element
+- grabbing only the first text per wrapper silently drops the rest.
+Pagination IDs are gathered separately from every element carrying a
+data-post attribute, so it works the same way for channels and groups.
 
 Output:
   subscription.txt  -> base64-encoded subscription (v2ray/clash format)
@@ -53,14 +59,20 @@ def iter_pages(channel: str, max_pages: int = MAX_PAGES):
     seen_ids = set()
     for _ in range(max_pages):
         soup = fetch_page(channel, before)
-        wrappers = soup.find_all("div", class_="tgme_widget_message", attrs={"data-post": True})
-        if not wrappers:
-            return
 
-        page_texts = []
+        # Text extraction: grab EVERY message-text block on the page,
+        # regardless of which wrapper element it sits inside. Group chats
+        # can cluster several messages (from different senders) inside
+        # one wrapper, so we must not stop at the first text per wrapper.
+        text_divs = soup.find_all("div", class_="tgme_widget_message_text")
+        page_texts = [d.get_text("\n") for d in text_divs]
+
+        # Pagination: independently collect every data-post id on the
+        # page (channels and groups both expose this per message).
+        id_elems = soup.find_all(attrs={"data-post": True})
         page_ids = []
-        for w in wrappers:
-            post = w.get("data-post", "")
+        for el in id_elems:
+            post = el.get("data-post", "")
             try:
                 mid = int(post.split("/")[-1])
             except Exception:
@@ -69,12 +81,15 @@ def iter_pages(channel: str, max_pages: int = MAX_PAGES):
                 continue
             seen_ids.add(mid)
             page_ids.append(mid)
-            text_div = w.find("div", class_="tgme_widget_message_text")
-            page_texts.append(text_div.get_text("\n") if text_div else "")
+
+        if not page_ids and not page_texts:
+            return  # nothing left / nothing found at all
+
+        if page_texts:
+            yield page_texts
 
         if not page_ids:
-            return
-        yield page_texts
+            return  # can't page further back
         before = min(page_ids)
         time.sleep(0.3)
 
