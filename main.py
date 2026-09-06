@@ -2,11 +2,14 @@
 """
 Telegram Config Subscription Builder
 -------------------------------------
-این اسکریپت آخرین پیام‌های یک کانال عمومی تلگرام رو (بدون نیاز به لاگین یا API key،
-با استفاده از پیش‌نمایش وب t.me/s/<channel>) می‌خونه، لینک‌های کانفیگ
-(vmess / vless / trojan / ss / hysteria2 / tuic) رو استخراج می‌کنه، کشور سرور هر
-کانفیگ رو با GeoIP تشخیص می‌ده، اسم (remark) کانفیگ رو به پرچم/اسم‌کشور تغییر می‌ده
-و یک فایل ساب‌اسکریپشن استاندارد (base64) برای V2rayNG / NekoBox / Hiddify و ... می‌سازه.
+این اسکریپت پیام‌های یک کانال عمومی تلگرام رو (بدون نیاز به لاگین یا API key،
+با استفاده از پیش‌نمایش وب t.me/s/<channel> و صفحه‌بندی به عقب) می‌خونه،
+کانفیگ‌ها (vmess/vless/trojan/ss/hysteria2/tuic) رو استخراج می‌کنه، کشور سرور
+هر کدوم رو با GeoIP تشخیص می‌ده و فقط کانفیگ‌های کشورهای مجاز رو نگه می‌داره:
+    - تعداد مشخصی با آدرس دامنه‌ای/حروفی (DOMAIN_QUOTA)
+    - تعداد مشخصی با آدرس IP عددی (IP_QUOTA)
+اسم (remark) هر کانفیگ رو به پرچم + اسم کشور تغییر می‌ده و یک فایل ساب‌اسکریپشن
+استاندارد (base64) می‌سازه.
 """
 
 import base64
@@ -24,7 +27,20 @@ from bs4 import BeautifulSoup
 
 # -------------------- تنظیمات --------------------
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "SOSkeyNET")
-MAX_CONFIGS = int(os.environ.get("MAX_CONFIGS", "30"))
+
+# فقط این کشورها نگه داشته میشن (کد دو حرفی ISO)
+ALLOWED_COUNTRY_CODES = {
+    c.strip().upper()
+    for c in os.environ.get("ALLOWED_COUNTRIES", "FR,IT,RU,NL,FI,PL").split(",")
+    if c.strip()
+}
+
+# سهمیه‌ها
+DOMAIN_QUOTA = int(os.environ.get("DOMAIN_QUOTA", "20"))  # آدرس حروفی/دامنه‌ای
+IP_QUOTA = int(os.environ.get("IP_QUOTA", "10"))          # آدرس IP عددی
+
+# حداکثر تعداد صفحه‌ای که به عقب برمی‌گرده (برای جلوگیری از حلقه بی‌نهایت)
+MAX_PAGES = int(os.environ.get("MAX_PAGES", "30"))
 
 # نحوه نام‌گذاری: flag | name | flag_name
 LABEL_STYLE = os.environ.get("LABEL_STYLE", "flag_name")
@@ -49,51 +65,133 @@ HEADERS = {
 _geo_cache: dict[str, dict] = {}
 
 
-# -------------------- گرفتن و پارس صفحه تلگرام --------------------
+# -------------------- گرفتن و پارس صفحات تلگرام (با صفحه‌بندی) --------------------
 
-def fetch_channel_html(channel: str) -> str:
-    """صفحه‌ی پیش‌نمایش عمومی کانال تلگرام رو می‌گیره (بدون نیاز به لاگین)."""
+def fetch_page(channel: str, before: int | None) -> str:
     url = f"https://t.me/s/{channel}"
+    if before:
+        url += f"?before={before}"
     resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
     return resp.text
 
 
-def extract_configs(html: str) -> tuple[list[str], dict]:
+def parse_page(html: str) -> tuple[list[str], int | None]:
     """
-    لینک‌های کانفیگ رو استخراج می‌کنه. به‌جای regex روی کل HTML خام (که با
-    تگ‌های تودرتوی تلگرام مثل <code>/<tg-spoiler>/<a> ممکنه لینک‌ها رو بشکنه)،
-    اول با BeautifulSoup متن خالص هر پیام رو درمیاریم.
+    متن پیام‌های یک صفحه رو برمی‌گردونه (به ترتیب قدیم -> جدید، همونطور که
+    تلگرام نمایش میده) به‌همراه کوچیک‌ترین شناسه‌ی پیام صفحه (برای صفحه‌بندی بعدی).
     """
     soup = BeautifulSoup(html, "html.parser")
-    message_blocks = soup.select(".tgme_widget_message_text")
+    message_els = soup.select(".tgme_widget_message[data-post]")
+
+    texts = []
+    min_id = None
+    for el in message_els:
+        data_post = el.get("data-post", "")
+        msg_id = None
+        if "/" in data_post:
+            try:
+                msg_id = int(data_post.rsplit("/", 1)[-1])
+            except ValueError:
+                msg_id = None
+        if msg_id is not None:
+            min_id = msg_id if min_id is None else min(min_id, msg_id)
+
+        text_block = el.select_one(".tgme_widget_message_text")
+        if text_block:
+            texts.append(text_block.get_text(separator="\n"))
+
+    return texts, min_id
+
+
+def collect_all_matching_configs() -> tuple[list[str], dict]:
+    """
+    از جدیدترین پیام‌ها شروع کرده و به عقب صفحه‌بندی می‌کنه تا سهمیه‌ی
+    DOMAIN_QUOTA (آدرس حروفی) و IP_QUOTA (آدرس عددی) از کشورهای مجاز پر بشه.
+    """
+    domain_results: list[str] = []
+    ip_results: list[str] = []
+
+    before = None
+    pages_fetched = 0
+    messages_scanned = 0
+    configs_scanned = 0
+    country_hits: dict[str, int] = {}
+
+    while pages_fetched < MAX_PAGES:
+        pages_fetched += 1
+        try:
+            html = fetch_page(CHANNEL, before)
+        except requests.RequestException as e:
+            print(f"[!] خطا در گرفتن صفحه {pages_fetched}: {e}", file=sys.stderr)
+            break
+
+        message_texts, min_id = parse_page(html)
+        if not message_texts:
+            print(f"[*] صفحه {pages_fetched}: پیامی پیدا نشد، توقف صفحه‌بندی.")
+            break
+
+        messages_scanned += len(message_texts)
+
+        # جدیدترین پیام‌های این صفحه اول پردازش بشن
+        for text in reversed(message_texts):
+            for m in CONFIG_PATTERN.finditer(text):
+                cfg = m.group(0).rstrip(".,؛،")
+                configs_scanned += 1
+
+                address = extract_address(cfg)
+                if not address:
+                    continue
+                ip = resolve_ip(address)
+                if not ip:
+                    continue
+                geo = geolocate(ip)
+                code = (geo.get("code") or "").upper()
+                if code not in ALLOWED_COUNTRY_CODES:
+                    continue
+
+                country_hits[code] = country_hits.get(code, 0) + 1
+                label = make_label(geo)
+
+                if is_ip(address):
+                    if len(ip_results) < IP_QUOTA:
+                        ip_results.append((cfg, label))
+                else:
+                    if len(domain_results) < DOMAIN_QUOTA:
+                        domain_results.append((cfg, label))
+
+                if len(domain_results) >= DOMAIN_QUOTA and len(ip_results) >= IP_QUOTA:
+                    break
+            if len(domain_results) >= DOMAIN_QUOTA and len(ip_results) >= IP_QUOTA:
+                break
+
+        if len(domain_results) >= DOMAIN_QUOTA and len(ip_results) >= IP_QUOTA:
+            break
+
+        if min_id is None:
+            print("[*] شناسه‌ی صفحه‌بندی پیدا نشد، توقف.")
+            break
+        before = min_id
+        time.sleep(0.3)
 
     debug = {
-        "html_length": len(html),
-        "message_blocks_found": len(message_blocks),
-        "title": soup.title.get_text(strip=True) if soup.title else None,
+        "pages_fetched": pages_fetched,
+        "messages_scanned": messages_scanned,
+        "configs_scanned": configs_scanned,
+        "country_hits": country_hits,
+        "domain_found": len(domain_results),
+        "ip_found": len(ip_results),
     }
 
-    full_matches: list[str] = []
-    if message_blocks:
-        for block in message_blocks:
-            text = block.get_text(separator="\n")
-            full_matches.extend(m.group(0) for m in CONFIG_PATTERN.finditer(text))
-    else:
-        full_text = soup.get_text(separator="\n")
-        full_matches = [m.group(0) for m in CONFIG_PATTERN.finditer(full_text)]
+    # شماره‌گذاری برچسب‌های تکراری (مثلا دو تا کانفیگ فرانسه)
+    label_counts: dict[str, int] = {}
+    final = []
+    for cfg, label in domain_results + ip_results:
+        label_counts[label] = label_counts.get(label, 0) + 1
+        final_label = label if label_counts[label] == 1 else f"{label} {label_counts[label]}"
+        final.append(rename_config(cfg, final_label))
 
-    seen = set()
-    unique = []
-    for cfg in full_matches:
-        cfg = cfg.rstrip(".,؛،")
-        if cfg not in seen:
-            seen.add(cfg)
-            unique.append(cfg)
-
-    debug["raw_matches"] = len(full_matches)
-    debug["unique_matches"] = len(unique)
-    return unique, debug
+    return final, debug
 
 
 # -------------------- استخراج آدرس سرور از هر پروتکل --------------------
@@ -111,17 +209,15 @@ def extract_address(uri: str) -> str | None:
     try:
         if uri.lower().startswith("vmess://"):
             b64 = uri[len("vmess://"):]
-            b64 += "=" * (-len(b64) % 4)  # تصحیح padding
+            b64 += "=" * (-len(b64) % 4)
             data = json.loads(base64.b64decode(b64).decode("utf-8", errors="ignore"))
             return data.get("add")
 
-        # سایر پروتکل‌ها: vless / trojan / ss / hysteria2 / hy2 / tuic
         parts = urlsplit(uri)
         host = parts.hostname
         if host:
             return host
 
-        # فرمت قدیمی ss:// که کل userinfo@host:port به‌صورت base64 هست
         if uri.lower().startswith("ss://"):
             body = uri[len("ss://"):].split("#", 1)[0]
             body += "=" * (-len(body) % 4)
@@ -150,7 +246,6 @@ def flag_emoji(country_code: str) -> str:
 
 
 def geolocate(ip: str) -> dict:
-    """کشور یک IP رو با یک سرویس رایگان GeoIP تشخیص میده (با کش)."""
     if ip in _geo_cache:
         return _geo_cache[ip]
     result = {"country": "Unknown", "code": None}
@@ -165,7 +260,7 @@ def geolocate(ip: str) -> dict:
     except requests.RequestException:
         pass
     _geo_cache[ip] = result
-    time.sleep(0.4)  # رعایت نرخ درخواست سرویس رایگان
+    time.sleep(0.3)
     return result
 
 
@@ -196,29 +291,8 @@ def rename_config(uri: str, label: str) -> str:
         except Exception:
             return uri
 
-    # سایر پروتکل‌ها: قسمت #remark در انتهای لینک
     base = uri.split("#", 1)[0]
     return f"{base}#{quote(label)}"
-
-
-def rename_all(configs: list[str]) -> list[str]:
-    renamed = []
-    country_counts: dict[str, int] = {}
-    for cfg in configs:
-        address = extract_address(cfg)
-        geo = {"country": "Unknown", "code": None}
-        if address:
-            ip = resolve_ip(address)
-            if ip:
-                geo = geolocate(ip)
-
-        label = make_label(geo)
-        country_counts[label] = country_counts.get(label, 0) + 1
-        if country_counts[label] > 1:
-            label = f"{label} {country_counts[label]}"
-
-        renamed.append(rename_config(cfg, label))
-    return renamed
 
 
 # -------------------- ساخت خروجی --------------------
@@ -239,45 +313,38 @@ def write_debug(debug: dict, extra_note: str = "") -> None:
 
 
 def main() -> None:
-    print(f"[*] در حال گرفتن پیام‌های کانال @{CHANNEL} ...")
-    try:
-        html = fetch_channel_html(CHANNEL)
-    except requests.RequestException as e:
-        print(f"[!] خطا در گرفتن صفحه تلگرام: {e}", file=sys.stderr)
-        write_debug({"error": str(e)})
-        sys.exit(1)
+    print(f"[*] در حال گرفتن و فیلتر کردن کانفیگ‌های کانال @{CHANNEL} ...")
+    print(f"[*] کشورهای مجاز: {sorted(ALLOWED_COUNTRY_CODES)}")
+    print(f"[*] سهمیه: {DOMAIN_QUOTA} دامنه‌ای + {IP_QUOTA} آی‌پی عددی")
 
-    configs, debug = extract_configs(html)
+    final_configs, debug = collect_all_matching_configs()
     print(f"[*] دیباگ: {debug}")
 
-    if not configs:
-        print("[!] هیچ کانفیگی در صفحه پیدا نشد.", file=sys.stderr)
-        note = (
-            "هیچ لینک کانفیگی پیدا نشد. اگه message_blocks_found برابر صفر بود یعنی "
-            "ساختار صفحه فرق داره یا تلگرام صفحه‌ی دیگه‌ای برگردونده. اگه "
-            "message_blocks_found > 0 ولی raw_matches صفر بود، یعنی پیام‌های اخیر "
-            "این کانال لینک متنی کانفیگ ندارن."
-        )
-        write_debug(debug, note)
+    if not final_configs:
+        print("[!] هیچ کانفیگی مطابق فیلترها پیدا نشد.", file=sys.stderr)
+        write_debug(debug, "هیچ کانفیگی مطابق کشورها/سهمیه‌های تعیین‌شده پیدا نشد.")
         sys.exit(1)
 
-    last_configs = configs[-MAX_CONFIGS:]
-    print(f"[*] {len(configs)} کانفیگ پیدا شد، {len(last_configs)} تای آخر انتخاب شد.")
-
-    print("[*] در حال تشخیص کشور سرورها (GeoIP) ...")
-    renamed_configs = rename_all(last_configs)
+    if debug["domain_found"] < DOMAIN_QUOTA or debug["ip_found"] < IP_QUOTA:
+        print(
+            f"[!] هشدار: به سهمیه کامل نرسیدیم "
+            f"(دامنه‌ای: {debug['domain_found']}/{DOMAIN_QUOTA}, "
+            f"عددی: {debug['ip_found']}/{IP_QUOTA}). "
+            f"شاید نیاز به افزایش MAX_PAGES باشه."
+        )
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     with open(RAW_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(renamed_configs) + "\n")
+        f.write("\n".join(final_configs) + "\n")
 
-    sub_content = build_subscription(renamed_configs)
+    sub_content = build_subscription(final_configs)
     with open(SUB_FILE, "w", encoding="utf-8") as f:
         f.write(sub_content)
 
     write_debug(debug, "اجرای موفق.")
 
+    print(f"[+] {len(final_configs)} کانفیگ نهایی ذخیره شد.")
     print(f"[+] فایل خام: {RAW_FILE}")
     print(f"[+] فایل ساب (base64): {SUB_FILE}")
 
