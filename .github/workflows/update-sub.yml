@@ -1,0 +1,50 @@
+name: Update Telegram Config Subscription
+
+on:
+  schedule:
+    # هر ۳۰ دقیقه یک‌بار اجرا میشه (زمان UTC)
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}   # امکان اجرای دستی از تب Actions
+
+permissions:
+  contents: write
+
+jobs:
+  update-sub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run collector
+        id: collector
+        continue-on-error: true
+        env:
+          TELEGRAM_CHANNEL: "SOSkeyNET"
+          ALLOWED_COUNTRIES: "FR,IT,RU,NL,FI,PL"
+          DOMAIN_QUOTA: "20"
+          IP_QUOTA: "10"
+          LABEL_STYLE: "flag_name"   # flag | name | flag_name
+        run: python main.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add subscription.txt debug_last_run.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: update subscription / debug log [skip ci]"
+          git push
+
+      - name: Fail job if collector failed
+        if: steps.collector.outcome == 'failure'
+        run: |
+          echo "Collector failed — see debug_last_run.txt for details."
+          exit 1
