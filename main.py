@@ -21,7 +21,7 @@ import requests
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "Gp_config")
 
 # چند تا کانفیگ آخر می‌خوایم
-MAX_CONFIGS = int(os.environ.get("MAX_CONFIGS", "30)
+MAX_CONFIGS = int(os.environ.get("MAX_CONFIGS", "30")
 
 # مسیر خروجی‌ها
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "sub")
