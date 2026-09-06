@@ -8,8 +8,8 @@ Telegram Config Subscription Builder
 هر کدوم رو با GeoIP تشخیص می‌ده و فقط کانفیگ‌های کشورهای مجاز رو نگه می‌داره:
     - تعداد مشخصی با آدرس دامنه‌ای/حروفی (DOMAIN_QUOTA)
     - تعداد مشخصی با آدرس IP عددی (IP_QUOTA)
-اسم (remark) هر کانفیگ رو به پرچم + اسم کشور تغییر می‌ده و یک فایل ساب‌اسکریپشن
-استاندارد (base64) می‌سازه.
+اسم (remark) هر کانفیگ رو به پرچم + اسم کشور تغییر می‌ده و همه رو در یک فایل
+متنی خام به اسم subscription.txt در ریشه‌ی ریپو ذخیره می‌کنه.
 """
 
 import base64
@@ -45,9 +45,9 @@ MAX_PAGES = int(os.environ.get("MAX_PAGES", "30"))
 # نحوه نام‌گذاری: flag | name | flag_name
 LABEL_STYLE = os.environ.get("LABEL_STYLE", "flag_name")
 
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "sub")
-RAW_FILE = os.path.join(OUTPUT_DIR, "configs_raw.txt")
-SUB_FILE = os.path.join(OUTPUT_DIR, "sub_base64.txt")
+# خروجی‌ها الان توی ریشه‌ی ریپو ذخیره میشن، نه توی یک پوشه جدا
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", ".")
+RAW_FILE = os.path.join(OUTPUT_DIR, "subscription.txt")
 DEBUG_FILE = os.path.join(OUTPUT_DIR, "debug_last_run.txt")
 
 CONFIG_PATTERN = re.compile(
@@ -297,11 +297,6 @@ def rename_config(uri: str, label: str) -> str:
 
 # -------------------- ساخت خروجی --------------------
 
-def build_subscription(configs: list[str]) -> str:
-    joined = "\n".join(configs)
-    return base64.b64encode(joined.encode("utf-8")).decode("utf-8")
-
-
 def write_debug(debug: dict, extra_note: str = "") -> None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     lines = [f"{k}: {v}" for k, v in debug.items()]
@@ -338,15 +333,10 @@ def main() -> None:
     with open(RAW_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(final_configs) + "\n")
 
-    sub_content = build_subscription(final_configs)
-    with open(SUB_FILE, "w", encoding="utf-8") as f:
-        f.write(sub_content)
-
     write_debug(debug, "اجرای موفق.")
 
     print(f"[+] {len(final_configs)} کانفیگ نهایی ذخیره شد.")
-    print(f"[+] فایل خام: {RAW_FILE}")
-    print(f"[+] فایل ساب (base64): {SUB_FILE}")
+    print(f"[+] فایل ساب: {RAW_FILE}")
 
 
 if __name__ == "__main__":
