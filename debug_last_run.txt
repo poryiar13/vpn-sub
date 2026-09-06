@@ -1,0 +1,8 @@
+pages_fetched: 2
+messages_scanned: 40
+configs_scanned: 213
+country_hits: {'NL': 22, 'FR': 15, 'RU': 13, 'PL': 7, 'FI': 4, 'IT': 1}
+domain_found: 20
+ip_found: 10
+
+اجرای موفق.
