@@ -17,11 +17,11 @@ from html import unescape
 import requests
 
 # -------------------- تنظیمات --------------------
-# آیدی کانال بدون @ (مثلا برای https://t.me/Gp_config مقدار "Gp_config")
+# آیدی کانال بدون @ (مثلا برای https://t.me/Gp_config مقدار "SOSkeyNET")
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "Gp_config")
 
 # چند تا کانفیگ آخر می‌خوایم
-MAX_CONFIGS = int(os.environ.get("MAX_CONFIGS", "20"))
+MAX_CONFIGS = int(os.environ.get("MAX_CONFIGS", "30)
 
 # مسیر خروجی‌ها
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "sub")
