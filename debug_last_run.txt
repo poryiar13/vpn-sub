@@ -1,7 +1,7 @@
-pages_fetched: 1
-messages_scanned: 20
-configs_scanned: 166
-country_hits: {'NL': 16, 'RU': 10, 'FR': 9, 'FI': 2, 'PL': 1}
+pages_fetched: 2
+messages_scanned: 40
+configs_scanned: 182
+country_hits: {'NL': 18, 'FI': 4, 'FR': 10, 'PL': 4, 'RU': 10}
 domain_found: 20
 ip_found: 10
 
